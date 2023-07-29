@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 
-from PIL import Image, ImageDraw, ImageFont, ImageColor, ImageFilter, ImageChops
+from PIL import Image, ImageDraw, ImageFont
 import os, sys, gzip, math, argparse, colorsys, datetime
 from collections import defaultdict
 from itertools import *
@@ -10,8 +10,16 @@ try:
     import urllib.request
     urlretrieve = urllib.request.urlretrieve
 except:
-    import urllib
-    urlretrieve = urllib.urlretrieve
+    from urllib.request import urlretrieve
+
+# todo:
+# matplotlib powered --interactive
+# arbitrary freq marker spacing
+# ppm
+# blue-less marker grid
+# fast summary thing
+# gain normalization
+# check pil version for brokenness
 
 vera_url = "https://github.com/keenerd/rtl-sdr-misc/raw/master/heatmap/Vera.ttf"
 vera_path = os.path.join(sys.path[0], "Vera.ttf")
@@ -209,13 +217,17 @@ def open_raw_data(path):
     return raw_data
 
 def slice_columns(columns, low_freq, high_freq):
+    low = min(columns)
+    high = max(columns)
     start_col = 0
-    stop_col  = len(columns)
-    if low_freq  is not None:
-        start_col = sum(f<low_freq   for f in columns)
-    if high_freq is not None:
-        stop_col  = sum(f<=high_freq for f in columns)
-    return start_col, stop_col-1
+    stop_col = len(columns) - 1
+
+    if low_freq is not None and low <= low_freq <= high:
+        start_col = sum(f<low_freq for f in columns)
+    if high_freq is not None and low <= high_freq <= high:
+        stop_col = sum(f<=high_freq for f in columns)
+
+    return start_col, stop_col
 
 def summarize_pass(args):
     "pumps a bunch of data back into the args construct"
@@ -348,7 +360,6 @@ def rgb_fn(palette, min_z, max_z):
     def rgb_inner(z):
         tone = (z - min_z) / (max_z - min_z)
         tone_scaled = int(tone * (len(palette)-1))
-        tone_scaled = min(tone_scaled, len(palette)-1)  # Ensure index is within palette range
         return palette[tone_scaled]
     return rgb_inner
 
@@ -457,31 +468,14 @@ def closest_index(n, m_list, interpolate=False):
         return i, i+1
     return i, i
 
-def autotrim(im):
-    bg = Image.new(im.mode, im.size, im.getpixel((0,0)))
-    diff = ImageChops.difference(im, bg)
-    diff = ImageChops.add(diff, diff, 2.0, -100)
-    bbox = diff.getbbox()
-    if bbox:
-        return im.crop(bbox)
-    else:
-        return im
-
-def word_aa(s, pt, fg, bg):
-    # font is Vera, size is 12 point
-    f = ImageFont.truetype('/home/dietpi/SpecSDR20/Vera.ttf', 12)
-    # get the size of the text
-    w, h = f.getsize(s)
-    # create a new image slightly larger that the text
-    img = Image.new('L', (w+2, h+2))
-    draw = ImageDraw.Draw(img)
-    draw.text((1, 1), s, font=f)
-    # use a truetype font with antialiasing
-    img = img.filter(ImageFilter.SMOOTH_MORE)
-    # autotrim annoying extra space
-    img = autotrim(img)
-    img = img.point(lambda p: int(round(p * (1 - ImageColor.getrgb(bg)[0]/255.0)))).convert('1')
-    return img
+def word_aa(label, pt, fg_color, bg_color):
+    f = ImageFont.truetype(vera_path, pt*3)
+    s = f.getsize(label)
+    s = (s[0], pt*3 + 3)  # getsize lies, manually compute
+    w_img = Image.new("RGB", s, bg_color)
+    w_draw = ImageDraw.Draw(w_img)
+    w_draw.text((0, 0), label, font=f, fill=fg_color)
+    return w_img.resize((s[0]//3, s[1]//3), Image.ANTIALIAS)
 
 def blend(percent, c1, c2):
     "c1 and c2 are RGB tuples"
